@@ -1,85 +1,113 @@
 """
-schemas.py — Modelos Pydantic para validación de entrada/salida de la API.
-
-Define los contratos de datos para todos los endpoints:
-  - Predicción de arritmias
-  - Explicabilidad (XAI)
-  - Generación de señal ECG
-  - Información de la arquitectura del modelo
-  - Pasos intermedios del pipeline
+schemas.py - Contratos de respuesta para la API basada en ECG real.
 """
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
-# ─── Requests ──────────────────────────────────────────────────────────
+class APIModel(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
 
 
-class RRSequenceRequest(BaseModel):
-    """Secuencia de 15 intervalos R-R en segundos."""
-    rr_intervals: List[float] = Field(
-        ...,
-        min_length=15,
-        max_length=15,
-        description="15 intervalos R-R en segundos"
-    )
-
-    @field_validator("rr_intervals")
-    @classmethod
-    def validate_rr(cls, values: List[float]):
-        for value in values:
-            if value <= 0 or value > 5:
-                raise ValueError(
-                    "Cada intervalo R-R debe estar en segundos y dentro de un rango razonable (0, 5]."
-                )
-        return values
-
-
-# ─── Responses ─────────────────────────────────────────────────────────
-
-
-class PredictionResponse(BaseModel):
-    """Resultado de predicción con clase, confianza y nivel de riesgo."""
+class PredictionResponse(APIModel):
     predicted_class: int
     class_name: str
     confidence: float
-    risk_level: str
     probabilities: Dict[str, float]
-    input_summary: Dict[str, float]
+    analyzed_segments: int
+    lead_name: str
+    detection_source: str
     model_mode: str
     model_version: str
+    model_key: str
+    model_label: str
 
 
-class ExplainResponse(BaseModel):
-    """Resultado de explicabilidad con importancia por timestep."""
+class HighlightRegion(APIModel):
+    beat_index: int
+    start_time: float
+    end_time: float
+    score: float
+
+
+class WaveformPreview(APIModel):
+    time: List[float]
+    raw_signal: List[float]
+    filtered_signal: List[float]
+    highlight_regions: List[HighlightRegion]
+
+
+class BeatPrediction(APIModel):
+    beat_index: int
+    sample: int
+    time_seconds: float
+    class_name: str
+    confidence: float
+    probabilities: Dict[str, float]
+
+
+class RepresentativeSegment(APIModel):
+    beat_index: int
+    signal: List[float]
+    saliency: List[float]
+    salient_region_ms: Dict[str, float]
+
+
+class ExplainResponse(APIModel):
     predicted_class: int
     class_name: str
     confidence: float
-    timestep_importance: List[float]
-    top_timesteps: List[int]
-    clinical_text: str
+    technical_summary: str
+    evidence: List[str]
+    limitations: List[str]
+    detection_source: str
+    top_beats: List[int]
+    representative_segment: RepresentativeSegment
     model_mode: str
     model_version: str
+    model_key: str
+    model_label: str
 
 
-class PredictExplainResponse(BaseModel):
-    """Respuesta combinada de predicción + explicabilidad."""
+class RecordSummary(APIModel):
+    record_name: str
+    original_fs: float
+    target_fs: float
+    duration_seconds: float
+    num_samples: int
+    analyzed_beats: int
+    lead_name: str
+
+
+class AnalyzeRecordResponse(APIModel):
+    record: RecordSummary
     prediction: PredictionResponse
     explanation: ExplainResponse
+    waveform_preview: WaveformPreview
+    beat_predictions: List[BeatPrediction]
 
 
-class ECGSignalResponse(BaseModel):
-    """Imagen ECG sintética codificada en base64 con metadata."""
-    ecg_image_base64: str
-    duration_seconds: float
-    num_beats: int
-    mean_heart_rate_bpm: float
-    fs: int
+class PipelineStep(APIModel):
+    step_name: str
+    description: str
+    details: Dict[str, float | int | str]
 
 
-class LayerInfo(BaseModel):
-    """Información de una capa del modelo de red neuronal."""
+class PipelineStepsResponse(APIModel):
+    record: RecordSummary
+    preprocessing_steps: List[PipelineStep]
+    waveform_preview: WaveformPreview
+    representative_segment: Optional[RepresentativeSegment] = None
+    prediction_probabilities: Dict[str, float]
+    predicted_class: str
+    model_mode: str
+    model_key: str
+    model_label: str
+
+
+class LayerInfo(APIModel):
     name: str
     type: str
     output_shape: Optional[str] = None
@@ -87,30 +115,15 @@ class LayerInfo(BaseModel):
     trainable: bool
 
 
-class ModelArchitectureResponse(BaseModel):
-    """Arquitectura completa del modelo incluyendo capas y metadatos."""
+class ModelArchitectureResponse(APIModel):
+    model_key: str
+    model_label: str
     model_mode: str
+    architecture_name: Optional[str] = None
     total_params: int
     trainable_params: int
     layers: List[LayerInfo]
-    input_shape: str
-    output_shape: str
+    input_shape: Optional[str] = None
+    output_shape: Optional[str] = None
     optimizer: Optional[str] = None
     loss_function: Optional[str] = None
-
-
-class FeatureStep(BaseModel):
-    """Un paso de derivación de features con sus valores."""
-    step_name: str
-    description: str
-    values: List[float]
-
-
-class PipelineStepsResponse(BaseModel):
-    """Visualización paso a paso del pipeline de procesamiento."""
-    raw_rr: List[float]
-    derived_features: List[FeatureStep]
-    normalized_sample: Optional[List[List[float]]] = None
-    prediction_probabilities: Dict[str, float]
-    predicted_class: str
-    model_mode: str

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    {% if include_plotly %}
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    {% endif %}
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-title">{{ app_name }}</div>
+                <div class="brand-subtitle">Revision ECG asistida para entornos clinicos</div>
+            </div>
+
+            <nav class="nav">
+                {% for item in nav_items %}
+                <a href="{{ item.path }}" class="{% if item.active %}active{% endif %}">{{ item.label }}</a>
+                {% endfor %}
+            </nav>
+
+            <div class="sidebar-meta">
+                <div class="meta-line">
+                    <span>Estado</span>
+                    <strong>{{ status_snapshot.backend_label }}</strong>
+                </div>
+                <div class="meta-line">
+                    <span>Modelo por defecto</span>
+                    <strong>{{ default_model_label }}</strong>
+                </div>
+                <div class="meta-line">
+                    <span>Version</span>
+                    <strong>{{ status_snapshot.model_version }}</strong>
+                </div>
+            </div>
+        </aside>
+
+        <div class="main-shell">
+            <header class="topbar">
+                <div class="topbar-copy">
+                    <h1>{{ page_title }}</h1>
+                    <p>{{ page_description }}</p>
+                </div>
+                <div class="topbar-tools">
+                    <div class="status-chip">{{ status_snapshot.model_mode }}</div>
+                    <a class="button" href="{{ request.url.path }}">Actualizar vista</a>
+                </div>
+            </header>
+
+            <main class="page-content">
+                {% if error_message %}
+                <div class="notice notice-error">{{ error_message }}</div>
+                {% endif %}
+
+                {% if success_message %}
+                <div class="notice notice-success">{{ success_message }}</div>
+                {% endif %}
+
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+</body>
+</html>

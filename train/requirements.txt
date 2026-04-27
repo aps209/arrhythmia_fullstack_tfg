@@ -1,5 +1,6 @@
 numpy
 pandas
 scikit-learn
-torch
+tensorflow==2.17.0
 wfdb
+scipy

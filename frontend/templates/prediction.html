@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section">
+    <h2>Enviar estudio</h2>
+    <p>La derivacion se selecciona automaticamente segun el criterio clinico definido por el backend. Solo es necesario cargar el estudio y escoger el modelo recurrente que se desea comparar.</p>
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        <div class="field field-wide">
+            <label for="files">Bundle WFDB</label>
+            <input id="files" name="files" type="file" multiple accept=".dat,.hea,.atr">
+            <div class="field-help">Sube los archivos del mismo registro. El sistema necesita al menos .dat + .hea.</div>
+        </div>
+        <div class="field">
+            <label for="model_key">Modelo de prediccion</label>
+            <select id="model_key" name="model_key">
+                {% for model in model_catalog %}
+                <option value="{{ model.model_key }}" {% if selected_model_key == model.model_key %}selected{% endif %}>
+                    {{ model.option_label }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field field-action">
+            <button class="button button-primary" type="submit">Analizar estudio</button>
+        </div>
+    </form>
+    <div class="inline-note">Los tres modelos comparten la misma presentacion de resultados para facilitar una comparacion directa.</div>
+    {% if selected_model and selected_model.model_mode != "trained" %}
+    <div class="inline-note">El modelo seleccionado todavia no tiene artefactos entrenados disponibles en el backend. La interfaz ya esta preparada para usarlo en cuanto se genere su `model.keras` y su `metadata.json`.</div>
+    {% endif %}
+</section>
+
+{% if has_result %}
+<section class="section">
+    <div class="result-header">
+        <div class="result-main">
+            <h2>Resultado principal</h2>
+            <p>{{ prediction_summary }}</p>
+        </div>
+        <div class="result-summary">
+            <div class="result-row"><span>Modelo utilizado</span><strong>{{ prediction.model_label }}</strong></div>
+            <div class="result-row"><span>Clase agregada</span><strong>{{ prediction.class_name }}</strong></div>
+            <div class="result-row"><span>Confianza</span><strong>{{ "{:.2%}".format(prediction.confidence) }}</strong></div>
+            <div class="result-row"><span>Latidos analizados</span><strong>{{ prediction.analyzed_segments }}</strong></div>
+            <div class="result-row"><span>Derivacion usada</span><strong>{{ prediction.lead_name }}</strong></div>
+            <div class="result-row"><span>Fuente de deteccion</span><strong>{{ prediction.detection_source }}</strong></div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <h2>Vista de senal</h2>
+    <div class="plot-frame">{{ waveform_plot | safe }}</div>
+</section>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Interpretacion tecnica</h2>
+        <p>{{ explanation.technical_summary }}</p>
+        <h3>Evidencia destacada</h3>
+        <ul class="plain-list">
+            {% for item in explanation.evidence %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="section">
+        <h2>Probabilidad por clase</h2>
+        <div class="plot-frame">{{ probabilities_plot | safe }}</div>
+    </section>
+</div>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Limitaciones de uso</h2>
+        <ul class="plain-list">
+            {% for item in explanation.limitations %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="section">
+        <h2>Datos del estudio</h2>
+        <div class="key-value-grid">
+            <div class="key-value">
+                <div class="key-label">Registro</div>
+                <div class="key-value-text">{{ record.record_name }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Duracion</div>
+                <div class="key-value-text">{{ "{:.2f}".format(record.duration_seconds) }} s</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Frecuencia original</div>
+                <div class="key-value-text">{{ "{:.1f}".format(record.original_fs) }} Hz</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Frecuencia objetivo</div>
+                <div class="key-value-text">{{ "{:.1f}".format(record.target_fs) }} Hz</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Muestras</div>
+                <div class="key-value-text">{{ record.num_samples }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Latidos revisados</div>
+                <div class="key-value-text">{{ record.analyzed_beats }}</div>
+            </div>
+        </div>
+    </section>
+</div>
+
+{% endif %}
+{% endblock %}

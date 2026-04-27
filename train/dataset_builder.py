@@ -1,62 +1,82 @@
+from __future__ import annotations
+
+import glob
+import sys
 from pathlib import Path
 from typing import Tuple
-import glob
 
 import numpy as np
-import wfdb
 
-AAMI_MAPPING = {
-    'N': 0, 'L': 0, 'R': 0, 'e': 0, 'j': 0,
-    'A': 1, 'a': 1, 'J': 1, 'S': 1,
-    'V': 2, 'E': 2,
-    'F': 3,
-    '/': 4, 'f': 4, 'Q': 4,
-}
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-VALID_BEATS = set(AAMI_MAPPING.keys())
-CLASS_NAMES = ['Normal', 'SVEB', 'VEB', 'Fusion', 'Unknown']
-
-
-def derive_features(rr_window: np.ndarray) -> np.ndarray:
-    rr_window = rr_window.astype(float)
-    rr_diff = np.diff(rr_window, prepend=rr_window[0])
-    rolling = np.array([rr_window[max(0, i - 2):i + 1].mean() for i in range(len(rr_window))])
-    rr_std = rr_window.std() if rr_window.std() > 1e-8 else 1.0
-    rr_z = (rr_window - rr_window.mean()) / rr_std
-    return np.stack([rr_window, rr_diff, rolling, rr_z], axis=-1)
+from backend.app.wfdb_tools import (  # noqa: E402
+    AAMI_MAPPING,
+    CLASS_NAMES,
+    load_annotations,
+    load_record,
+    segment_windows,
+)
 
 
-def build_dataset(data_dir: str, n_steps: int = 15) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    record_files = sorted(glob.glob(str(Path(data_dir) / '*.dat')))
-    record_ids = [Path(f).stem for f in record_files]
+def build_dataset(
+    data_dir: str,
+    target_fs: int = 250,
+    window_size: int = 256,
+    pre_samples: int = 96,
+    preferred_lead: str | None = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Construye dataset supervisado de latidos ECG reales centrados en anotaciones AAMI."""
+    record_files = sorted(glob.glob(str(Path(data_dir) / "*.hea")))
+    record_ids = [Path(filepath).stem for filepath in record_files]
 
     X, y, groups = [], [], []
 
     for record_id in record_ids:
-        record_path = str(Path(data_dir) / record_id)
-
+        record_path = Path(data_dir) / record_id
         try:
-            ann = wfdb.rdann(record_path, 'atr')
-            filtered_samples, filtered_symbols = [], []
-
-            for sample, symbol in zip(ann.sample, ann.symbol):
-                if symbol in VALID_BEATS:
-                    filtered_samples.append(sample)
-                    filtered_symbols.append(symbol)
-
-            if len(filtered_samples) <= n_steps + 1:
+            loaded = load_record(record_path, target_fs=target_fs, preferred_lead=preferred_lead)
+            annotations = load_annotations(record_path, original_fs=loaded.original_fs, target_fs=loaded.target_fs)
+            if annotations is None:
                 continue
 
-            rr = np.diff(filtered_samples) / 360.0
+            segments, valid_centers = segment_windows(
+                loaded.filtered_signal,
+                annotations.samples,
+                window_size=window_size,
+                pre_samples=pre_samples,
+            )
+            if len(segments) == 0:
+                continue
 
-            for i in range(len(rr) - n_steps):
-                window = rr[i:i + n_steps]
-                label = AAMI_MAPPING[filtered_symbols[i + n_steps + 1]]
-                X.append(derive_features(window))
-                y.append(label)
-                groups.append(record_id)
+            centers_set = set(valid_centers.tolist())
+            label_map = {
+                int(sample): AAMI_MAPPING[symbol]
+                for sample, symbol in zip(annotations.samples, annotations.symbols)
+                if int(sample) in centers_set and symbol in AAMI_MAPPING
+            }
 
+            record_labels = []
+            record_segments = []
+            for segment, center in zip(segments, valid_centers):
+                label = label_map.get(int(center))
+                if label is None:
+                    continue
+                record_segments.append(segment[:, np.newaxis])
+                record_labels.append(label)
+
+            if not record_segments:
+                continue
+
+            X.extend(record_segments)
+            y.extend(record_labels)
+            groups.extend([record_id] * len(record_labels))
         except Exception:
             continue
 
-    return np.asarray(X, dtype=np.float32), np.asarray(y, dtype=np.int64), np.asarray(groups)
+    return (
+        np.asarray(X, dtype=np.float32),
+        np.asarray(y, dtype=np.int64),
+        np.asarray(groups),
+    )

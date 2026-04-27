@@ -1,168 +1,128 @@
-# ❤️ Arrhythmia Early Warning Platform
+# Arrhythmia ECG Workstation
 
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-2.17-orange?logo=tensorflow&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.38-red?logo=streamlit&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
-![License](https://img.shields.io/badge/License-Academic-lightgrey)
+Plataforma full-stack para análisis de arritmias sobre ECG real en formato WFDB. El sistema ya no trabaja con cadenas de intervalos R-R como entrada principal: consume registros `.dat + .hea` y utiliza `.atr` cuando existe para segmentación supervisada.
 
-**Trabajo de Fin de Grado** — Plataforma full-stack para detección temprana de arritmias cardíacas a partir de ventanas de 15 intervalos R-R, utilizando redes neuronales recurrentes bidireccionales (CNN + BiLSTM).
+## Qué hace ahora
 
----
+- Carga registros WFDB reales desde frontend y backend
+- Segmenta latidos sobre ECG filtrado y remuestreado
+- Clasifica cada segmento con un modelo `Conv1D + BiLSTM`
+- Agrega probabilidades a nivel de registro
+- Genera explicabilidad técnica basada en gradientes sobre la señal real
+- Visualiza ECG bruto, ECG filtrado y regiones temporales relevantes
 
-## 📸 Características Principales
+## Arquitectura
 
-- 🔬 **Predicción de arritmias** en 5 clases AAMI (Normal, SVEB, VEB, Fusion, Unknown)
-- 💓 **Visualización ECG sintética** generada a partir de intervalos R-R
-- 🧠 **Pipeline visual** paso a paso de la red neuronal
-- 📊 **Explicabilidad (XAI)** por oclusión de timesteps
-- 🎨 **Interfaz premium** con diseño glassmorphism y modo oscuro
-- 🐳 **Dockerizado** para despliegue sencillo
+- Frontend: Gradio
+- Backend: FastAPI
+- Modelo: TensorFlow / Keras
+- Backbone: `Conv1D + BiLSTM`
+- Dataset objetivo: MIT-BIH Arrhythmia Database en formato WFDB
 
----
+## Formato de entrada
 
-## 🏗️ Arquitectura del Sistema
+Para inferencia se requiere al menos:
 
-```
-┌──────────────────────┐     HTTP/REST     ┌──────────────────────┐
-│                      │ ◄──────────────── │                      │
-│   Frontend           │                   │   Backend            │
-│   (Streamlit)        │ ──────────────► │   (FastAPI)          │
-│                      │                   │                      │
-│   • Dashboard        │                   │   • /predict         │
-│   • Predicción + ECG │                   │   • /explain         │
-│   • Red Neuronal     │                   │   • /ecg-signal      │
-│   • Documentación    │                   │   • /pipeline-steps  │
-│                      │                   │   • /model-arch      │
-└──────────────────────┘                   └──────────┬───────────┘
-                                                      │
-                                           ┌──────────▼───────────┐
-                                           │   Modelo ML          │
-                                           │   (TensorFlow/Keras) │
-                                           │                      │
-                                           │   Conv1D + BiLSTM    │
-                                           │   → Softmax (5)      │
-                                           └──────────────────────┘
+- `registro.dat`
+- `registro.hea`
+
+Opcional, pero recomendado:
+
+- `registro.atr`
+
+Nota: el fichero `.dat` por sí solo no basta. El `.hea` es obligatorio para interpretar correctamente el ECG.
+
+## Entrenamiento
+
+Instala dependencias:
+
+```bash
+cd train
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
----
+Ejecuta entrenamiento:
 
-## 🔌 API Endpoints
-
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| `GET` | `/health` | Estado del sistema |
-| `GET` | `/model-info` | Metadata del modelo |
-| `GET` | `/model-architecture` | Arquitectura detallada (capas, parámetros) |
-| `POST` | `/predict` | Predicción de clase de arritmia |
-| `POST` | `/explain` | Explicabilidad por oclusión |
-| `POST` | `/predict-and-explain` | Predicción + explicabilidad combinadas |
-| `POST` | `/ecg-signal` | Generación de ECG sintético (PNG base64) |
-| `POST` | `/pipeline-steps` | Pasos intermedios del pipeline |
-
----
-
-## 📂 Estructura del Proyecto
-
-```
-arrhythmia_fullstack_tfg/
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── config.py          # Configuración y rutas
-│   │   ├── ecg_generator.py   # Generador de ECG sintético
-│   │   ├── main.py            # Aplicación FastAPI
-│   │   ├── model_service.py   # Servicio de inferencia y XAI
-│   │   └── schemas.py         # Modelos Pydantic
-│   ├── tests/
-│   │   └── test_api.py        # Tests de integración
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
-│   ├── pages/
-│   │   ├── 1_🔬_Prediccion.py       # Predicción + ECG
-│   │   ├── 2_🧠_Red_Neuronal.py     # Pipeline visual
-│   │   └── 3_📊_Acerca_del_Proyecto.py  # Documentación
-│   ├── app.py                 # Dashboard principal
-│   ├── styles.py              # Sistema de diseño CSS
-│   ├── Dockerfile
-│   └── requirements.txt
-├── train/
-│   ├── dataset_builder.py     # Constructor del dataset MIT-BIH
-│   └── train_patient_split.py # Entrenamiento con GroupShuffleSplit
-├── artifacts/                 # model.keras, scaler.joblib, metadata.json
-├── docker-compose.yml
-└── README.md
+```bash
+python train_patient_split.py ^
+  --data-dir C:\Users\alexp\Downloads\redes neuronales\redes neuronales\mit-bih-arrhythmia-database-1.0.0 ^
+  --artifacts-dir ..\artifacts ^
+  --target-fs 250 ^
+  --window-size 256 ^
+  --pre-samples 96 ^
+  --epochs 35
 ```
 
----
+El script:
 
-## 🚀 Cómo levantar el proyecto
+1. Lee registros WFDB con `wfdb.rdrecord`
+2. Usa anotaciones `.atr` para mapear latidos a clases AAMI
+3. Selecciona derivación automáticamente o la derivación indicada
+4. Remuestrea, filtra y segmenta el ECG
+5. Separa train/val/test por registro con `GroupShuffleSplit`
+6. Entrena `Conv1D + BiLSTM`
+7. Guarda `artifacts/model.keras` y `artifacts/metadata.json`
 
-### Opción 1: Docker Compose (recomendado)
+## Inferencia local
+
+Backend:
+
+```bash
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+set BACKEND_URL=http://127.0.0.1:8000
+set PORT=8501
+python app.py
+```
+
+## Docker
 
 ```bash
 docker-compose up --build
 ```
 
-- Frontend: **http://localhost:8501**
-- Backend: **http://localhost:8000**
-- API Docs: **http://localhost:8000/docs**
+## Endpoints principales
 
-### Opción 2: Ejecución local
+- `GET /health`
+- `GET /model-info`
+- `GET /model-architecture`
+- `POST /analyze-record`
+- `POST /predict-and-explain`
+- `POST /pipeline-steps`
 
-**Terminal 1 — Backend:**
-```bash
-cd backend
-python -m venv .venv
-.\.venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+Los endpoints de inferencia reciben `multipart/form-data` con varios ficheros `files`.
 
-**Terminal 2 — Frontend:**
-```bash
-cd frontend
-python -m venv .venv
-.\.venv\Scripts\activate      # Windows
-pip install -r requirements.txt
-set BACKEND_URL=http://127.0.0.1:8000
-streamlit run app.py --server.port 8501 --server.address 127.0.0.1
-```
-
----
-
-## 🧪 Tests
+## Tests
 
 ```bash
 cd backend
-python -m pytest tests/test_api.py -v
+python -m pytest tests -v
 ```
 
----
+## Métricas objetivo
 
-## 🧠 Pipeline de Machine Learning
+- Accuracy
+- Macro-F1
+- Balanced Accuracy
+- Sensibilidad por clase
+- Especificidad por clase
+- Matriz de confusión
 
-1. **Datos**: MIT-BIH Arrhythmia Database (PhysioNet)
-2. **Segmentación**: Ventanas de 15 intervalos R-R consecutivos
-3. **Features**: 4 canales (R-R, ΔR-R, Media Móvil, Z-Score)
-4. **Normalización**: StandardScaler por feature
-5. **Modelo**: Conv1D(32) → BN → BiLSTM(64) → BiLSTM(32) → Dense(64) → Softmax(5)
-6. **Validación**: GroupShuffleSplit por paciente (sin data leakage)
-7. **Clases**: 5 superclases AAMI (N, SVEB, VEB, F, Q)
+## Observaciones
 
----
-
-## 📚 Referencias
-
-- Moody, G. B., & Mark, R. G. (2001). The Impact of the MIT-BIH Arrhythmia Database.
-- ANSI/AAMI EC57:2012. Testing and Reporting Performance Results.
-- Hochreiter, S., & Schmidhuber, J. (1997). Long Short-Term Memory.
-- de Chazal, P., et al. (2004). Automatic Classification of Heartbeats.
-
----
-
-## 📄 Licencia
-
-Proyecto académico — Trabajo de Fin de Grado.
+- Si `artifacts/model.keras` no existe, el backend no hace inferencia y responderá con error 503.
+- La explicabilidad usa gradientes sobre el segmento ECG representativo. Eso describe sensibilidad del modelo, no causalidad fisiológica absoluta.

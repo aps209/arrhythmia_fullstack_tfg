@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section">
+    <div class="status-strip">
+        <div class="status-item">
+            <div class="status-label">Backend</div>
+            <div class="status-value">{{ status_snapshot.backend_label }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Modo principal</div>
+            <div class="status-value">{{ status_snapshot.model_mode }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Version</div>
+            <div class="status-value">{{ status_snapshot.model_version }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Catalogo</div>
+            <div class="status-value">{{ model_catalog | length }} modelos</div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <h2>Catalogo de modelos</h2>
+    {{ model_catalog_table_html | safe }}
+</section>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Arquitectura por defecto</h2>
+        {% if architecture %}
+        <div class="key-value-grid">
+            <div class="key-value">
+                <div class="key-label">Modelo</div>
+                <div class="key-value-text">{{ architecture.model_label }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Arquitectura</div>
+                <div class="key-value-text">{{ architecture.architecture_name or "No disponible" }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Parametros</div>
+                <div class="key-value-text">{{ "{:,}".format(architecture.total_params) }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Trainable</div>
+                <div class="key-value-text">{{ "{:,}".format(architecture.trainable_params) }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Entrada</div>
+                <div class="key-value-text">{{ architecture.input_shape or "No disponible" }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Salida</div>
+                <div class="key-value-text">{{ architecture.output_shape or "No disponible" }}</div>
+            </div>
+        </div>
+        {% else %}
+        <p>No ha sido posible recuperar la arquitectura del backend.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2>Metadata operativa</h2>
+        {{ metadata_table_html | safe }}
+    </section>
+</div>
+{% endblock %}

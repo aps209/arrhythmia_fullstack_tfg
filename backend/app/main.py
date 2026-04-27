@@ -1,48 +1,32 @@
 """
-main.py — Aplicación FastAPI principal para la API de predicción de arritmias.
-
-Endpoints disponibles:
-  GET  /health               → Estado del sistema
-  GET  /model-info            → Información del modelo
-  GET  /model-architecture    → Arquitectura detallada de la red neuronal
-  POST /predict               → Predicción de arritmia
-  POST /explain               → Explicabilidad por oclusión
-  POST /predict-and-explain   → Predicción + explicabilidad combinadas
-  POST /ecg-signal            → Generación de señal ECG sintética
-  POST /pipeline-steps        → Pasos intermedios del pipeline
+main.py - API FastAPI para analisis de ECG real mediante WFDB.
 """
 
-import logging
+from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import logging
+import tempfile
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from .schemas import (
-    RRSequenceRequest,
-    PredictionResponse,
-    ExplainResponse,
-    PredictExplainResponse,
-    ECGSignalResponse,
-    ModelArchitectureResponse,
-    PipelineStepsResponse,
-)
-from .model_service import service
-from .ecg_generator import generate_ecg_image
+from .config import DEFAULT_MODEL_KEY
+from .model_service import ModelUnavailableError, service
+from .schemas import AnalyzeRecordResponse, ModelArchitectureResponse, PipelineStepsResponse
 
-# Configurar logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ─── Aplicación FastAPI ────────────────────────────────────────────────
-
 app = FastAPI(
-    title="Arrhythmia Early Warning API",
+    title="Arrhythmia ECG Analysis API",
     description=(
-        "API REST para predicción temprana de arritmias cardíacas "
-        "a partir de ventanas de 15 intervalos R-R. Incluye explicabilidad "
-        "por oclusión, generación de ECG sintético y visualización del pipeline."
+        "API REST para analisis de arritmias a partir de ECG crudo en formato WFDB "
+        "(.dat + .hea y opcionalmente .atr)."
     ),
-    version="2.0.0",
+    version="4.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -56,108 +40,101 @@ app.add_middleware(
 )
 
 
-# ─── Endpoints de estado ──────────────────────────────────────────────
+def _persist_uploads(temp_dir: Path, files: List[UploadFile]) -> Path:
+    stems = {}
+    for upload in files:
+        filename = Path(upload.filename or "")
+        if not filename.name:
+            continue
+        if filename.suffix.lower() not in {".dat", ".hea", ".atr"}:
+            continue
+        destination = temp_dir / filename.name
+        with destination.open("wb") as buffer:
+            buffer.write(upload.file.read())
+        stems.setdefault(filename.stem, set()).add(filename.suffix.lower())
+
+    candidates = [stem for stem, suffixes in stems.items() if ".dat" in suffixes and ".hea" in suffixes]
+    if not candidates:
+        raise HTTPException(status_code=422, detail="Debes subir al menos un par `.dat + .hea` del mismo registro.")
+
+    return temp_dir / sorted(candidates)[0]
+
+
+def _handle_analysis(record_path: Path, model_key: Optional[str] = None) -> dict:
+    try:
+        return service.analyze_record(record_path, preferred_lead=None, model_key=model_key)
+    except ModelUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Error analizando el registro WFDB")
+        raise HTTPException(status_code=500, detail=f"Error interno analizando ECG: {exc}") from exc
 
 
 @app.get("/health", tags=["Sistema"])
 def health():
-    """Comprueba el estado de salud del servicio y el modelo cargado."""
+    default_info = service.get_model_info(DEFAULT_MODEL_KEY)
     return {
         "status": "ok",
         "model_mode": service.mode,
         "model_version": service.metadata.get("model_version", "unknown"),
-        "expected_input": "15_rr_intervals_seconds",
+        "default_model_key": DEFAULT_MODEL_KEY,
+        "available_models": service.available_models(),
+        "expected_input": "wfdb_bundle_dat_hea_optional_atr",
+        "selected_model": {
+            "model_key": default_info["model_key"],
+            "model_label": default_info["model_label"],
+        },
     }
 
 
 @app.get("/model-info", tags=["Sistema"])
-def model_info():
-    """Devuelve información general del modelo y su metadata."""
-    return {
-        "model_mode": service.mode,
-        "metadata": service.metadata,
-    }
+def model_info(model_key: Optional[str] = Query(default=None)):
+    return service.get_model_info(model_key=model_key)
 
 
-# ─── Endpoints de predicción ──────────────────────────────────────────
+@app.get("/model-architecture", response_model=ModelArchitectureResponse, tags=["Sistema"])
+def model_architecture(model_key: Optional[str] = Query(default=None)):
+    return service.get_architecture_info(model_key=model_key)
 
 
-@app.post("/predict", response_model=PredictionResponse, tags=["Predicción"])
-def predict(payload: RRSequenceRequest):
-    """
-    Predice la clase de arritmia a partir de 15 intervalos R-R.
-    Devuelve clase predicha, confianza, nivel de riesgo y probabilidades.
-    """
-    logger.info("POST /predict — %d intervalos recibidos", len(payload.rr_intervals))
-    return service.make_prediction_response(payload.rr_intervals)
+@app.post("/analyze-record", response_model=AnalyzeRecordResponse, tags=["Inferencia"])
+def analyze_record(
+    files: List[UploadFile] = File(...),
+    model_key: Optional[str] = Form(default=None),
+):
+    logger.info("POST /analyze-record - %d archivos recibidos - modelo=%s", len(files), model_key or DEFAULT_MODEL_KEY)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        record_path = _persist_uploads(Path(tmp_dir), files)
+        return _handle_analysis(record_path, model_key=model_key)
 
 
-@app.post("/explain", response_model=ExplainResponse, tags=["Explicabilidad"])
-def explain(payload: RRSequenceRequest):
-    """
-    Genera explicación de la predicción identificando los timesteps
-    más influyentes mediante oclusión.
-    """
-    logger.info("POST /explain — análisis de explicabilidad")
-    return service.explain(payload.rr_intervals)
+@app.post("/predict-and-explain", response_model=AnalyzeRecordResponse, tags=["Inferencia"])
+def predict_and_explain(
+    files: List[UploadFile] = File(...),
+    model_key: Optional[str] = Form(default=None),
+):
+    logger.info("POST /predict-and-explain - alias de /analyze-record")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        record_path = _persist_uploads(Path(tmp_dir), files)
+        return _handle_analysis(record_path, model_key=model_key)
 
 
-@app.post("/predict-and-explain", response_model=PredictExplainResponse, tags=["Predicción"])
-def predict_and_explain(payload: RRSequenceRequest):
-    """Predicción y explicabilidad combinadas en una sola llamada."""
-    logger.info("POST /predict-and-explain")
-    prediction = service.make_prediction_response(payload.rr_intervals)
-    explanation = service.explain(payload.rr_intervals)
-    return {"prediction": prediction, "explanation": explanation}
-
-
-# ─── Endpoints de visualización ────────────────────────────────────────
-
-
-@app.post("/ecg-signal", response_model=ECGSignalResponse, tags=["Visualización"])
-def ecg_signal(payload: RRSequenceRequest):
-    """
-    Genera una señal ECG sintética a partir de los intervalos R-R
-    y devuelve la imagen como PNG codificado en base64.
-    """
-    logger.info("POST /ecg-signal — generando ECG sintético")
-    try:
-        rr = payload.rr_intervals
-        explanation = service.explain(rr)
-        highlight = explanation.get("top_timesteps", [])
-
-        ecg_b64 = generate_ecg_image(rr, highlight_indices=highlight)
-        duration = sum(rr)
-        mean_hr = 60.0 / (sum(rr) / len(rr)) if sum(rr) > 0 else 0.0
-
-        return {
-            "ecg_image_base64": ecg_b64,
-            "duration_seconds": round(duration, 3),
-            "num_beats": len(rr),
-            "mean_heart_rate_bpm": round(mean_hr, 1),
-            "fs": 500,
-        }
-    except Exception as e:
-        logger.error("Error generando ECG: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error al generar ECG: {str(e)}")
-
-
-@app.get("/model-architecture", response_model=ModelArchitectureResponse, tags=["Visualización"])
-def model_architecture():
-    """
-    Devuelve la arquitectura completa del modelo: capas, parámetros,
-    shapes de entrada/salida y configuración del optimizador.
-    """
-    logger.info("GET /model-architecture")
-    return service.get_architecture_info()
-
-
-@app.post("/pipeline-steps", response_model=PipelineStepsResponse, tags=["Visualización"])
-def pipeline_steps(payload: RRSequenceRequest):
-    """
-    Muestra paso a paso cómo el pipeline transforma los R-R crudos
-    a través de la derivación de features, normalización y predicción.
-    Diseñado para uso educativo y visualización en el frontend.
-    """
-    logger.info("POST /pipeline-steps — visualización del pipeline")
-    return service.get_pipeline_steps(payload.rr_intervals)
+@app.post("/pipeline-steps", response_model=PipelineStepsResponse, tags=["Visualizacion"])
+def pipeline_steps(
+    files: List[UploadFile] = File(...),
+    model_key: Optional[str] = Form(default=None),
+):
+    logger.info("POST /pipeline-steps - %d archivos recibidos - modelo=%s", len(files), model_key or DEFAULT_MODEL_KEY)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        record_path = _persist_uploads(Path(tmp_dir), files)
+        try:
+            return service.get_pipeline_steps(record_path, preferred_lead=None, model_key=model_key)
+        except ModelUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Error obteniendo pipeline")
+            raise HTTPException(status_code=500, detail=f"Error interno obteniendo pipeline: {exc}") from exc

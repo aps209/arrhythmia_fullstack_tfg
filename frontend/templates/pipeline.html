@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section">
+    <h2>Revisar pipeline</h2>
+    <p>La vista tecnica mantiene el mismo flujo para las tres arquitecturas recurrentes y omite el desglose latido a latido para centrarse en los pasos realmente utiles de auditoria.</p>
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        <div class="field field-wide">
+            <label for="files">Bundle WFDB</label>
+            <input id="files" name="files" type="file" multiple accept=".dat,.hea,.atr">
+            <div class="field-help">Carga el registro completo que se desea inspeccionar.</div>
+        </div>
+        <div class="field">
+            <label for="model_key">Modelo</label>
+            <select id="model_key" name="model_key">
+                {% for model in model_catalog %}
+                <option value="{{ model.model_key }}" {% if selected_model_key == model.model_key %}selected{% endif %}>{{ model.option_label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field field-action">
+            <button class="button button-primary" type="submit">Visualizar pipeline</button>
+        </div>
+    </form>
+    {% if selected_model and selected_model.model_mode != "trained" %}
+    <div class="inline-note">Este modelo aparece en el catalogo y en la vista tecnica, pero seguira marcado como pendiente hasta que se entrenen y guarden sus artefactos.</div>
+    {% endif %}
+</section>
+
+{% if architecture %}
+<section class="section">
+    <h2>Arquitectura seleccionada</h2>
+    <div class="key-value-grid">
+        <div class="key-value">
+            <div class="key-label">Modelo</div>
+            <div class="key-value-text">{{ architecture.model_label }}</div>
+        </div>
+        <div class="key-value">
+            <div class="key-label">Arquitectura</div>
+            <div class="key-value-text">{{ architecture.architecture_name or "No disponible" }}</div>
+        </div>
+        <div class="key-value">
+            <div class="key-label">Parametros</div>
+            <div class="key-value-text">{{ "{:,}".format(architecture.total_params) }}</div>
+        </div>
+        <div class="key-value">
+            <div class="key-label">Estado</div>
+            <div class="key-value-text">{{ "Disponible" if architecture.model_mode == "trained" else "Pendiente de entrenamiento" }}</div>
+        </div>
+        <div class="key-value">
+            <div class="key-label">Entrada</div>
+            <div class="key-value-text">{{ architecture.input_shape or "No disponible" }}</div>
+        </div>
+        <div class="key-value">
+            <div class="key-label">Salida</div>
+            <div class="key-value-text">{{ architecture.output_shape or "No disponible" }}</div>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if has_result %}
+<div class="layout-two">
+    <section class="section">
+        <h2>Previsualizacion de senal</h2>
+        <div class="plot-frame">{{ pipeline_plot | safe }}</div>
+    </section>
+
+    <section class="section">
+        <h2>Resumen del registro</h2>
+        <div class="key-value-grid">
+            <div class="key-value">
+                <div class="key-label">Modelo utilizado</div>
+                <div class="key-value-text">{{ pipeline_model_label }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Registro</div>
+                <div class="key-value-text">{{ pipeline_record.record_name }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Duracion</div>
+                <div class="key-value-text">{{ "{:.2f}".format(pipeline_record.duration_seconds) }} s</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Frecuencia original</div>
+                <div class="key-value-text">{{ "{:.1f}".format(pipeline_record.original_fs) }} Hz</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Frecuencia objetivo</div>
+                <div class="key-value-text">{{ "{:.1f}".format(pipeline_record.target_fs) }} Hz</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Derivacion usada</div>
+                <div class="key-value-text">{{ pipeline_record.lead_name }}</div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Pasos de preprocesado</h2>
+        {{ steps_table_html | safe }}
+    </section>
+
+    <section class="section">
+        <h2>Probabilidad agregada</h2>
+        <div class="plot-frame">{{ pipeline_probabilities_plot | safe }}</div>
+    </section>
+</div>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Capas del modelo</h2>
+        {{ layers_table_html | safe }}
+    </section>
+
+    <section class="section">
+        <h2>Segmento representativo</h2>
+        {% if representative_segment %}
+        <div class="key-value-grid">
+            <div class="key-value">
+                <div class="key-label">Latido</div>
+                <div class="key-value-text">{{ representative_segment.beat_index }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Region saliente</div>
+                <div class="key-value-text">
+                    {{ "{:.2f}".format(representative_segment.salient_region_ms.start_ms) }}
+                    -
+                    {{ "{:.2f}".format(representative_segment.salient_region_ms.end_ms) }} ms
+                </div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Ancho saliente</div>
+                <div class="key-value-text">{{ "{:.2f}".format(representative_segment.salient_region_ms.width_ms) }} ms</div>
+            </div>
+        </div>
+        {% if representative_plot %}
+        <div class="plot-frame">{{ representative_plot | safe }}</div>
+        {% endif %}
+        {% else %}
+        <p>No se ha podido calcular un segmento representativo para este registro.</p>
+        {% endif %}
+    </section>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section">
+    <div class="status-strip">
+        <div class="status-item">
+            <div class="status-label">Backend</div>
+            <div class="status-value">{{ status_snapshot.backend_label }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Modelo por defecto</div>
+            <div class="status-value">{{ default_model_label }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Modelos registrados</div>
+            <div class="status-value">{{ model_catalog | length }}</div>
+        </div>
+        <div class="status-item">
+            <div class="status-label">Entrada esperada</div>
+            <div class="status-value">WFDB (.dat + .hea)</div>
+        </div>
+    </div>
+</section>
+
+<div class="layout-two">
+    <section class="section">
+        <h2>Operacion prevista</h2>
+        <p>La aplicacion esta organizada para una revision rapida del estudio, con los mismos bloques de salida en Prediccion y Pipeline para facilitar comparaciones entre modelos recurrentes.</p>
+        <ol class="workflow-list">
+            {% for step in workflow_steps %}
+            <li>{{ step }}</li>
+            {% endfor %}
+        </ol>
+    </section>
+
+    <section class="section">
+        <h2>Modelo activo por defecto</h2>
+        {% if architecture %}
+        <div class="key-value-grid">
+            <div class="key-value">
+                <div class="key-label">Arquitectura</div>
+                <div class="key-value-text">{{ architecture.architecture_name }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Parametros</div>
+                <div class="key-value-text">{{ "{:,}".format(architecture.total_params) }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Entrada</div>
+                <div class="key-value-text">{{ architecture.input_shape or "No disponible" }}</div>
+            </div>
+            <div class="key-value">
+                <div class="key-label">Salida</div>
+                <div class="key-value-text">{{ architecture.output_shape or "No disponible" }}</div>
+            </div>
+        </div>
+        {% else %}
+        <p>No ha sido posible recuperar la arquitectura del modelo por defecto.</p>
+        {% endif %}
+    </section>
+</div>
+
+<section class="section">
+    <h2>Catalogo de modelos</h2>
+    {{ model_catalog_table_html | safe }}
+</section>
+{% endblock %}
